@@ -42,11 +42,6 @@
   "union"
   "volatile"
   "while"
-  "_Atomic"
-  "_Generic"
-  "_Noreturn"
-  "_Static_assert"
-  "_Thread_local"
 ] @keyword
 
 ; --- Preprocessor ---
@@ -59,11 +54,8 @@
   "#ifdef"
   "#ifndef"
   "#include"
-  "#pragma"
-  "#undef"
+  (preproc_directive)
 ] @keyword
-
-(preproc_directive) @keyword
 
 ; --- Operators ---
 [
@@ -123,9 +115,9 @@
 ] @string
 
 (escape_sequence) @string.escape
-(true) @boolean
-(false) @boolean
-(nullptr) @constant
+(true) @constant
+(false) @constant
+(null) @constant
 
 [
   (number_literal)
@@ -194,51 +186,44 @@
 ; --- C++ Built-in values ---
 (this) @variable.special
 
-; --- C++ Module names ---
-(module_name
-  (identifier) @label)
-
-; --- C++ Keywords ---
+; --- C++ Keywords (validated against node-types.json) ---
 [
   "catch"
   "class"
   "co_await"
   "co_return"
   "co_yield"
+  "concept"
+  "consteval"
   "constexpr"
   "constinit"
-  "consteval"
   "decltype"
   "delete"
   "explicit"
+  "export"
   "final"
   "friend"
+  "import"
+  "module"
   "mutable"
   "namespace"
-  "noexcept"
   "new"
+  "noexcept"
+  "nullptr"
   "operator"
   "override"
   "private"
   "protected"
   "public"
+  "requires"
   "static_assert"
-  "static_cast"
-  "dynamic_cast"
-  "reinterpret_cast"
-  "const_cast"
   "template"
+  "thread_local"
   "throw"
   "try"
   "typename"
-  "typeid"
   "using"
-  "concept"
-  "requires"
   "virtual"
-  "import"
-  "export"
-  "module"
 ] @keyword
 
 ; --- C++ Strings ---

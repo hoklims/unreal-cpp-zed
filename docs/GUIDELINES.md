@@ -99,7 +99,7 @@ repository = "https://github.com/tree-sitter/tree-sitter-xxx"
 commit = "abc123def456..."          # SHA complet du commit Git
 ```
 
-> **Attention** : certaines docs mentionnent `rev` au lieu de `commit`. Les deux semblent acceptes, mais les extensions officielles Zed (GLSL, HTML...) utilisent `commit`. Privilegier `commit`.
+> **`rev` vs `commit`** : Le champ canonique est `rev` (confirme dans le code source Rust : `pub rev: String`). Le champ `commit` est un **alias** (`#[serde(alias = "commit")]`). Les deux fonctionnent. Les extensions officielles Zed (GLSL, HTML) utilisent `commit`, la documentation utilise `rev`.
 
 ### Section language server (optionnel)
 
@@ -254,17 +254,21 @@ first_line_pattern = "^#!.*python"
 first_line_pattern = '^#version \d+'
 ```
 
-### `block_comment` — Seuls `start` et `end` sont lus
+### `block_comment` — Type `BlockCommentConfigHelper` (untagged enum)
 
-Zed ne lit que `start` et `end` dans cette table. Les cles `prefix` et `tab_size` sont ignorees silencieusement :
+Le champ `block_comment` est un **enum non-tague** avec deux variantes possibles. Utiliser le mauvais format cause une erreur TOML fatale qui empeche le chargement du langage.
 
+**Format 1 — Objet complet (les 4 champs sont OBLIGATOIRES)** :
 ```toml
-# Ce qui est lu
-block_comment = { start = "/*", end = "*/" }
-
-# Ceci fonctionne aussi mais prefix/tab_size sont ignores
-block_comment = { start = "/* ", prefix = "* ", end = "*/", tab_size = 1 }
+block_comment = { start = "/* ", end = "*/", prefix = "* ", tab_size = 1 }
 ```
+
+**Format 2 — Array legacy (2 elements : start, end)** :
+```toml
+block_comment = ["/* ", " */"]
+```
+
+> **ERREUR COURANTE** : `{ start = "/*", end = "*/" }` avec seulement 2 champs sur 4 ne matche **aucune** variante et cause `data did not match any variant of untagged enum BlockCommentConfigHelper`. Utiliser soit les 4 champs, soit le format array.
 
 ---
 
@@ -439,13 +443,13 @@ Vous voulez creer un langage "Mon Dialecte C++" qui utilise la meme grammaire qu
 
 ### Ce qui NE MARCHE PAS
 
-- Referencier la grammaire built-in par nom seul (`grammar = "cpp"` sans `[grammars.cpp]`)
-- Le mecanisme `; inherits: c` dans les queries (c'est une convention Neovim, pas Zed)
-- Heriter automatiquement des highlights d'un autre langage
+- **Referencier la grammaire built-in par nom seul** (`grammar = "cpp"` sans `[grammars.cpp]`) : la grammaire built-in de Zed peut etre une version differente avec des types de noeuds differents. Vos queries risquent de casser sur des noeuds invalides.
+- **Le mecanisme `; inherits: c`** dans les queries (c'est une convention Neovim, pas Zed)
+- **Heriter automatiquement** des highlights d'un autre langage
 
 ### Ce qui MARCHE
 
-Declarer la meme grammaire Tree-sitter dans votre extension.toml :
+**Toujours declarer sa propre grammaire** dans extension.toml, meme si c'est la meme que le built-in. Cela garantit que vos queries sont compatibles avec la version exacte de la grammaire :
 
 ```toml
 # extension.toml
@@ -474,6 +478,51 @@ Quand Zed charge votre langage, il utilise **uniquement** les queries de votre d
 
 - **C** : https://github.com/tree-sitter/tree-sitter-c/blob/master/queries/highlights.scm
 - **C++** : https://github.com/tree-sitter/tree-sitter-cpp/blob/master/queries/highlights.scm
+
+### Validation obligatoire : node-types.json
+
+**Avant d'utiliser un token ou un noeud dans vos queries**, verifier qu'il existe dans `src/node-types.json` du repo de la grammaire au commit que vous avez pinne.
+
+```bash
+# Recuperer les tokens anonymes valides (keywords, operateurs)
+curl -sL "https://raw.githubusercontent.com/tree-sitter/tree-sitter-cpp/<SHA>/src/node-types.json" \
+  | python -c "import sys,json; [print(n['type']) for n in json.load(sys.stdin) if not n.get('named')]" | sort
+
+# Verifier les noeuds nommes
+curl -sL "https://raw.githubusercontent.com/tree-sitter/tree-sitter-cpp/<SHA>/src/node-types.json" \
+  | python -c "import sys,json; [print(n['type']) for n in json.load(sys.stdin) if n.get('named')]" | sort
+```
+
+**Tokens qui n'existent PAS dans tree-sitter-cpp (erreur courante)** :
+- `"static_cast"`, `"dynamic_cast"`, `"reinterpret_cast"`, `"const_cast"` — ce ne sont PAS des tokens anonymes, ils font partie de noeud types comme `static_cast_expression`
+- `"typeid"` — meme raison, c'est un `sizeof_expression` variant
+- `"_Static_assert"`, `"_Thread_local"`, `"_Atomic"` etc. — tokens C11 absents de tree-sitter-cpp
+
+**Tokens qui EXISTENT (souvent oublies)** :
+- `"nullptr"` — token anonyme valide dans tree-sitter-cpp
+- `"static_assert"` — token valide (different de `"_Static_assert"`)
+- `"co_await"`, `"co_return"`, `"co_yield"` — C++20, valides
+- `"concept"`, `"requires"`, `"consteval"`, `"constinit"` — C++20, valides
+- `"import"`, `"export"`, `"module"` — C++20 modules, valides
+
+### Validation des patterns d'outline
+
+Pour `outline.scm`, verifier les types de champs acceptes par chaque noeud dans `node-types.json`. Exemple pour `namespace_definition` :
+
+```json
+"namespace_definition": {
+  "name": { "types": [{"type": "namespace_identifier"}, {"type": "nested_namespace_specifier"}] }
+}
+```
+
+Donc :
+```scheme
+; ERREUR — name n'accepte pas (identifier)
+(namespace_definition name: (identifier) @name) @item
+
+; CORRECT — utiliser namespace_identifier
+(namespace_definition name: (namespace_identifier) @name) @item
+```
 
 ### Noeud types tree-sitter-cpp importants
 
@@ -693,6 +742,20 @@ zed::register_extension!(MyExtension);
 | Coloration partielle | Patterns manquants | L'extension doit etre autonome, pas d'heritage |
 | Mauvais langage selectionne | Conflit `path_suffixes` | Utiliser `file_types` dans settings.json |
 | Extension pas visible | `extension.toml` invalide | Verifier schema_version = 1, tous les champs requis |
+| "Invalid node type X" | Token inexistant dans la grammaire | Verifier `node-types.json` (voir section 7) |
+| "data did not match any variant" | `block_comment` mal formate | Utiliser format array `["/*", "*/"]` ou objet complet avec 4 champs |
+| "Impossible pattern" dans outline | Mauvais type de champ dans le pattern | Verifier les types de `fields` dans `node-types.json` |
+| Langage "Unknown" | Langage echoue a charger | `zed: open log` → chercher "failed to load language" |
+| "skipping compilation... up to date" | WASM cache obsolete | Supprimer `grammars/` puis `zed: reload extensions` |
+
+### Procedure de debug recommandee
+
+1. **`zed: open log`** — chercher `failed to load language` ou `Query error`
+2. L'erreur indique le **numero de ligne exact** et le **noeud invalide**
+3. Corriger le fichier `.scm` concerne
+4. **`zed: reload extensions`** — Zed recharge sans fermer
+5. Re-verifier les logs
+6. Repeter jusqu'a plus d'erreur — **un seul noeud invalide bloque tout le langage**
 
 ---
 
@@ -752,21 +815,38 @@ Puis mettre a jour la version dans `extensions.toml` et ouvrir une PR.
 Contrairement a Neovim, Zed ne supporte pas `; inherits: c` dans les queries d'extensions.
 Vos queries doivent etre **100% autonomes**.
 
-### Noeuds qui n'existent pas
+### Noeuds / tokens qui n'existent pas
 
-Certains noeuds mentionnes dans d'anciens docs n'existent pas dans les grammaires actuelles :
+C'est l'erreur **la plus courante** et la plus frustrante. Un seul token invalide dans highlights.scm empeche le chargement **complet** du langage (pas juste ce token — TOUT le langage echoue).
 
 ```scheme
-; ERREUR — `null` n'est pas un type de noeud en tree-sitter-c/cpp
+; ERREUR — (null "nullptr" @constant) n'existe pas comme pattern
 (null "nullptr" @constant)
 
-; CORRECT — nullptr est son propre noeud terminal
-(nullptr) @constant
-
-; CORRECT — NULL est un identifiant (macro C), matche par le pattern ALL_CAPS
-((identifier) @constant
-  (#match? @constant "^[A-Z][A-Z\\d_]*$"))
+; CORRECT — null est un noeud nomme, nullptr est un token anonyme
+(null) @constant
+"nullptr" @keyword
 ```
+
+**Methode de debug** : lire `zed: open log` apres chaque `zed: reload extensions`. L'erreur indique le numero de ligne exact et le nom du noeud invalide.
+
+### Tokens anonymes vs types de noeuds nommes
+
+Confusion tres frequente. Les **tokens anonymes** (entre guillemets) sont les mots-cles/operateurs litteraux definis dans grammar.js. Les **noeuds nommes** (entre parentheses) sont les regles nommees.
+
+```scheme
+; Token anonyme — le mot-cle litteral "class" dans le code source
+"class" @keyword
+
+; Noeud nomme — le noeud class_specifier qui englobe toute la declaration
+(class_specifier) @type
+
+; ERREUR — "static_cast" n'est PAS un token anonyme dans tree-sitter-cpp
+; c'est un sous-type de cast_expression
+"static_cast" @keyword
+```
+
+Pour verifier : chercher le token dans `src/node-types.json` du repo de la grammaire. Les tokens anonymes ont `"named": false`.
 
 ### `//` n'est pas un operateur
 
@@ -788,9 +868,44 @@ Le lexer Tree-sitter consomme `//` comme debut de commentaire avant que les quer
 Si vos patterns specifiques ne fonctionnent pas, verifier l'ordre :
 les patterns specifiques doivent etre **apres** les patterns generiques.
 
-### block_comment — champs ignores
+### block_comment — format strict
 
-Zed ne lit que `start` et `end`. Les autres cles (`prefix`, `tab_size`) sont ignorees silencieusement.
+Le champ `block_comment` est un enum non-tague. Utiliser **soit** le format objet avec les 4 champs obligatoires, **soit** le format array legacy :
+
+```toml
+# ERREUR — 2 champs sur 4 = ne matche aucune variante
+block_comment = { start = "/*", end = "*/" }
+
+# CORRECT — format objet complet
+block_comment = { start = "/* ", end = "*/", prefix = "* ", tab_size = 1 }
+
+# CORRECT — format array legacy
+block_comment = ["/* ", " */"]
+```
+
+### Grammaire WASM cachee
+
+Zed cache la grammaire compilee dans `grammars/` a la racine de l'extension. Si vous changez le commit de la grammaire dans `extension.toml`, Zed peut reutiliser l'ancien WASM. Solution :
+
+```bash
+# Supprimer le cache pour forcer la recompilation
+rm -rf grammars/
+# Puis zed: reload extensions
+```
+
+Ajouter `grammars/` au `.gitignore`.
+
+### "Impossible pattern" dans outline.scm
+
+Les patterns d'outline doivent matcher les types de champs exacts de la grammaire. Verifier `node-types.json` :
+
+```scheme
+; ERREUR — namespace_definition.name accepte namespace_identifier, pas identifier
+(namespace_definition name: (identifier) @name) @item
+
+; CORRECT
+(namespace_definition name: (namespace_identifier) @name) @item
+```
 
 ---
 
