@@ -1,0 +1,11 @@
+id = "unreal-cpp"
+name = "Unreal C++"
+description = "Unreal Engine C++ support — reflection macros, specifiers, and UE-aware syntax highlighting."
+version = "0.1.0"
+schema_version = 1
+authors = ["Guillaume <hoklims@gmail.com>"]
+repository = "https://github.com/hoklims/unreal-cpp-zed"
+
+[grammars.cpp]
+repository = "https://github.com/tree-sitter/tree-sitter-cpp"
+commit = "8b5b49eb196bec7040441bee33b2c9a4838d6967"

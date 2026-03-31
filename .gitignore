@@ -1,0 +1,25 @@
+# Build artifacts
+target/
+*.wasm
+
+# Rust
+Cargo.lock
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Zed dev extension cache
+.zed/
+
+# Environment
+.env
+.env.local
